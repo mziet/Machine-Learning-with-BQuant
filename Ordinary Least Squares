@@ -1,0 +1,55 @@
+import bql
+import statsmodels.api as sm
+import pandas as pd
+import matplotlib.pyplot as plt
+
+import warnings
+warnings.filterwarnings("ignore")
+
+bq = bql.Service()
+
+tickers_returns = ['SPX Index','WIG Index']
+tickers_prices = ['VIX Index']
+
+request_returns = bql.Request(tickers_returns, {'Returns':bq.data.return_series(calc_interval=bq.func.range('-15Y','0D',frq='D'))})
+request_prices = bql.Request(tickers_prices, {'Prices':bq.data.px_last(dates = bq.func.range('-15Y','0D',frq='D'))})
+
+response_returns = bq.execute(request_returns)
+response_prices = bq.execute(request_prices)
+
+returns = response_returns[0].df()
+returns = returns.reset_index()
+returns_data = returns.pivot(index='DATE', values='Returns',columns='ID')
+prices = response_prices[0].df()
+prices=prices.reset_index()
+prices_data = prices.pivot(index='DATE',values='Prices',columns='ID')
+
+data = pd.concat([returns_data,prices_data],axis=1)
+data = data.dropna()
+data.head()
+
+X = data[['SPX Index', 'WIG Index']]
+Y = data[['VIX Index']]
+
+X['SPX_sq'] = X['SPX Index']**2
+X['WIG_sq'] = X['WIG Index']**2
+data.tail()
+
+X = sm.add_constant(X)
+model = sm.OLS(Y,X).fit()
+
+predictions = model.predict()
+
+model.summary()
+
+#P>|t| dla WIG Index powinno być duże (bliskie 1), czyli ok
+
+out = pd.DataFrame(predictions)
+out = out.rename(columns={0: 'Fitted values'})
+date = Y.index
+
+plt.plot(Y)
+out = out.set_index(date)
+plt.plot(out)
+plt.legend(['VIX', 'fitted values'])
+plt.show()
