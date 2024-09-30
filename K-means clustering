@@ -1,0 +1,111 @@
+from sklearn.decomposition import PCA
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+from sklearn.cluster import KMeans
+import bql
+
+bq = bql.Service()
+
+#1. Perform CPA
+
+univ = bq.univ.members('wig index')
+
+fields = bq.data.day_to_day_total_return(dates = bq.func.range('-2Y','0d'),fill = 'prev')
+
+req = bql.Request(univ,{'ret':fields})
+
+resp = bq.execute(req)
+
+data = resp[0].df()
+rets = data.reset_index().pivot(index = 'DATE', columns = 'ID', values = 'ret')
+corr_mtx = rets.corr()
+stock_names = rets.columns.values
+num_components = 5
+pca = PCA(n_components = num_components)
+principal_components = pca.fit_transform(corr_mtx)
+col_labels = ['PCA' + str(x) for x in range(num_components)]
+PCAdf = pd.DataFrame(data = principal_components, columns = col_labels, index = stock_names)
+
+
+
+#2. Find index_return and index_and_pca_returns
+
+univ = 'wig index'
+fields = bq.data.day_to_day_total_return(dates = bq.func.range('-2Y','0d'),fill = 'prev')
+req = bql.Request(univ, {'ret':fields})
+resp = bq.execute(req)
+data = resp[0].df()
+index_return = data.reset_index().pivot(index = 'DATE', columns = 'ID', values = 'ret')
+index_return = index_return.dropna()
+pca_returns = pd.DataFrame(index = rets.index, columns = col_labels)
+for i, comp in enumerate(pca.components_):
+    pca_returns.iloc[:,i] = rets.multiply(comp/sum(comp)).sum(axis=1)
+index_and_pca_returns = pd.concat([index_return,pca_returns],axis = 1)
+
+
+PCAdf.head()
+
+#Clustering is performed with respect to PCA coefficients
+
+def run_km(n_clusters = 2, df = None):
+    km = KMeans(n_clusters = n_clusters)
+    array_clusters = km.fit_predict(df)
+    df_kmeans = df.copy()
+    df_kmeans['cluster'] = array_clusters.astype(str)
+    return km,df_kmeans
+ 
+
+km_2 = run_km(n_clusters=2, df=PCAdf)
+
+km_2
+
+# Visualisation of exemplary dimensions
+
+plt.scatter(PCAdf.iloc[:,0], PCAdf.iloc[:,1],c=km_2[0].labels_.astype(float))
+plt.xlabel('PCA0')
+plt.ylabel('PCA1')
+plt.show()
+
+plt.scatter(PCAdf.iloc[:,2], PCAdf.iloc[:,3],c=km_2[0].labels_.astype(float))
+plt.xlabel('PCA2')
+plt.ylabel('PCA3')
+plt.show()
+
+plt.scatter(PCAdf.iloc[:,4], PCAdf.iloc[:,3],c=km_2[0].labels_.astype(float))
+plt.xlabel('PCA4')
+plt.ylabel('PCA3')
+plt.show()
+
+plt.scatter(PCAdf.iloc[:,0], PCAdf.iloc[:,4],c=km_2[0].labels_.astype(float))
+plt.xlabel('PCA0')
+plt.ylabel('PCA4')
+plt.show()
+
+# Clustering error
+
+inertia = []
+for i in range (2,15):
+    inertia.append(run_km(n_clusters =i,df = PCAdf)[0].inertia_)
+
+inertiadf = pd.DataFrame(inertia)
+inertiadf.set_index(i for i in range(2,15))
+plt.plot(inertiadf)
+
+#3 seems to be optimal 
+
+km_3 = run_km(n_clusters = 3, df=PCAdf)
+
+plt.scatter(PCAdf.iloc[:,0], PCAdf.iloc[:,4],c=km_3[0].labels_.astype(float))
+plt.xlabel('PCA0')
+plt.ylabel('PCA4')
+plt.show()
+
+plt.scatter(PCAdf.iloc[:,2], PCAdf.iloc[:,3],c=km_3[0].labels_.astype(float))
+plt.xlabel('PCA2')
+plt.ylabel('PCA3')
+plt.show()
+
+# What do the clusters contain?
+
+PCAdf.loc[km_3[0].labels_ == 0,:].index
