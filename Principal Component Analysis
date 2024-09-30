@@ -1,0 +1,70 @@
+from sklearn.decomposition import PCA
+import bql
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+bq = bql. Service()
+
+univ = bq.univ.members('wig index')
+
+fields = bq.data.day_to_day_total_return(dates = bq.func.range('-2Y','0d'),fill = 'prev')
+
+req = bql.Request(univ,{'ret':fields})
+
+resp = bq.execute(req)
+
+data = resp[0].df()
+
+rets = data.reset_index().pivot(index = 'DATE', columns = 'ID', values = 'ret')
+
+rets.head()
+
+corr_mtx = rets.corr()
+
+
+stock_names = rets.columns.values
+
+num_components = 3
+pca = PCA(n_components = num_components)
+principal_components = pca.fit_transform(corr_mtx)
+col_labels = ['PCA' + str(x) for x in range(num_components)]
+
+PCAdf = pd.DataFrame(data = principal_components, columns = col_labels, index = stock_names)
+
+PCAdf.head()
+
+s = PCAdf.size/3
+x = np.arange(1,s+1,1)
+y0 = PCAdf['PCA0']
+y1 = PCAdf['PCA1']
+y2 = PCAdf['PCA2']
+plt.figure(figsize=(20,5))
+plt.bar(x,y0,width = 0.4)
+
+
+#Reconstructing components based on historical data
+
+univ = 'wig index'
+fields = bq.data.day_to_day_total_return(dates = bq.func.range('-2Y','0d'),fill = 'prev')
+req = bql.Request(univ, {'ret':fields})
+resp = bq.execute(req)
+data = resp[0].df()
+
+index_return = data.reset_index().pivot(index = 'DATE', columns = 'ID', values = 'ret')
+index_return = index_return.dropna()
+
+pca_returns = pd.DataFrame(index = rets.index, columns = col_labels)
+for i, comp in enumerate(pca.components_):
+    pca_returns.iloc[:,i] = rets.multiply(comp/sum(comp)).sum(axis=1)
+
+figure, axis = plt.subplots(2,1)
+figure.set_figheight(14)
+figure.set_figwidth(40)
+axis[0].plot(pca_returns, linewidth = 0.7)
+axis[0].set_title('PCAs')
+axis[1].plot(index_return, linewidth = 1)
+axis[1].set_title('WIG')
+plt.show
+
+
+# ! CPAs nie mają replikować indeksu WIG (nie uwzględniają wielkości spółkie na tle rynku).
